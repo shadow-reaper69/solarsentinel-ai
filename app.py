@@ -18,15 +18,20 @@ from engine.report import generate_pdf_report
 # ── App Configuration ──
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max total
-app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'static', 'uploads')
-app.config['PROCESSED_FOLDER'] = os.path.join(os.path.dirname(__file__), 'static', 'processed')
-app.config['REPORTS_FOLDER'] = os.path.join(os.path.dirname(__file__), 'reports')
+
+# For Vercel Serverless, only /tmp is writable
+BASE_DIR = '/tmp' if os.environ.get('VERCEL') == '1' else os.path.dirname(__file__)
+
+app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'uploads')
+app.config['PROCESSED_FOLDER'] = os.path.join(BASE_DIR, 'static', 'processed')
+app.config['REPORTS_FOLDER'] = os.path.join(BASE_DIR, 'reports')
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif', 'webp'}
 
 # Create directories
 for folder in [app.config['UPLOAD_FOLDER'], app.config['PROCESSED_FOLDER'], app.config['REPORTS_FOLDER']]:
     os.makedirs(folder, exist_ok=True)
+
 
 # Store latest analysis results for report generation
 latest_results = []
@@ -116,14 +121,14 @@ def upload_images():
                 'marked_image': detection_result['marked_image'],
                 'metadata': metadata,
                 'predictions': predictions,
-                'upload_url': url_for('static', filename=f'uploads/{unique_filename}'),
-                'marked_url': url_for('static', filename=f'processed/{detection_result["marked_image"]}'),
+                'upload_url': f"/file/uploads/{unique_filename}" if os.environ.get('VERCEL') == '1' else url_for('static', filename=f'uploads/{unique_filename}'),
+                'marked_url': f"/file/processed/{detection_result['marked_image']}" if os.environ.get('VERCEL') == '1' else url_for('static', filename=f'processed/{detection_result["marked_image"]}'),
             }
 
             # Add zoom image URLs
             for fault in image_result['faults']:
                 if fault.get('zoom_image'):
-                    fault['zoom_url'] = url_for('static', filename=f'processed/{fault["zoom_image"]}')
+                    fault['zoom_url'] = f"/file/processed/{fault['zoom_image']}" if os.environ.get('VERCEL') == '1' else url_for('static', filename=f'processed/{fault["zoom_image"]}')
                 else:
                     fault['zoom_url'] = None
 
@@ -170,6 +175,9 @@ def generate_report():
         return jsonify({'error': 'No analysis results available. Please upload and analyze images first.'}), 400
 
     report_filename = f"solar_inspection_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    
+    # Ensure reports folder exists on Vercel
+    os.makedirs(app.config['REPORTS_FOLDER'], exist_ok=True)
     report_path = os.path.join(app.config['REPORTS_FOLDER'], report_filename)
 
     try:
@@ -187,6 +195,21 @@ def generate_report():
         )
     except Exception as e:
         return jsonify({'error': f'Report generation failed: {str(e)}'}), 500
+
+
+@app.route('/file/<folder>/<filename>')
+def serve_file(folder, filename):
+    """Serve files from /tmp on Vercel"""
+    if os.environ.get('VERCEL') != '1':
+        return jsonify({'error': 'Not found'}), 404
+        
+    if folder not in ['uploads', 'processed']:
+        return jsonify({'error': 'Invalid folder'}), 400
+        
+    file_path = os.path.join(app.config[f"{folder.upper()}_FOLDER"], filename)
+    if os.path.exists(file_path):
+        return send_file(file_path)
+    return jsonify({'error': 'File not found'}), 404
 
 
 if __name__ == '__main__':
