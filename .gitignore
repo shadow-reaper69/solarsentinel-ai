@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+static/uploads/*
+static/processed/*
+reports/*
+test_images/
+get-pip.py
+*.egg-info/
+dist/
+build/
+.DS_Store
+Thumbs.db
+!static/uploads/.gitkeep
+!static/processed/.gitkeep
+!reports/.gitkeep
